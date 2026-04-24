@@ -42,3 +42,12 @@ docker-compose up -d
 
 # 4. Проверить работу
 curl http://localhost:8080/health
+```
+
+### 📚 API Documentation
+Swagger UI: http://localhost:8080/swagger/index.html
+
+**Генерация swagger файла**
+```
+swag init -g cmd/main.go -o swagger_docs
+```

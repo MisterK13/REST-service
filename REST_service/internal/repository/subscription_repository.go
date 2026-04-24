@@ -15,7 +15,7 @@ type SubscriptionRepository interface {
 	Update(ctx context.Context, sub *models.Subscription) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, userID *uuid.UUID, serviceName *string, limit, offset int) ([]models.Subscription, int64, error)
-	GetTotalCost(ctx context.Context, userID *uuid.UUID, serviceName *string, startDate, endDate time.Time) (int, error)
+	GetActiveSubscriptions(ctx context.Context, userID *uuid.UUID, serviceName *string, startDate, endDate time.Time) ([]models.Subscription, error)
 }
 
 type subscriptionRepository struct {
@@ -75,20 +75,20 @@ func (r *subscriptionRepository) List(ctx context.Context, userID *uuid.UUID, se
 	return subs, total, err
 }
 
-func (r *subscriptionRepository) GetTotalCost(ctx context.Context, userID *uuid.UUID, serviceName *string, startDate, endDate time.Time) (int, error) {
-	query := r.db.WithContext(ctx).Model(&models.Subscription{}).
-		Where("start_date <= ?", endDate).
-		Where("end_date IS NULL OR end_date >= ?", startDate)
-
-	if userID != nil {
-		query = query.Where("user_id = ?", *userID)
-	}
-
-	if serviceName != nil {
-		query = query.Where("service_name = ?", *serviceName)
-	}
-
-	var total int
-	err := query.Select("COALESCE(SUM(price), 0)").Scan(&total).Error
-	return total, err
+func (r *subscriptionRepository) GetActiveSubscriptions(ctx context.Context, userID *uuid.UUID, serviceName *string, startDate, endDate time.Time) ([]models.Subscription, error) {
+	var subs []models.Subscription
+    
+    query := r.db.WithContext(ctx).
+        Where("start_date <= ?", endDate).
+        Where("end_date IS NULL OR end_date >= ?", startDate)
+    
+    if userID != nil {
+        query = query.Where("user_id = ?", *userID)
+    }
+    if serviceName != nil && *serviceName != "" {
+        query = query.Where("service_name = ?", *serviceName)
+    }
+    
+    err := query.Find(&subs).Error
+    return subs, err
 }

@@ -34,6 +34,11 @@ func NewSubscriptionService(repo repository.SubscriptionRepository, logger *logr
 	}
 }
 
+var (
+    ErrInvalidDateRange = errors.New("end_date cannot be before start_date")
+    ErrSubscriptionNotFound = errors.New("subscription not found")
+)
+
 func (s *subscriptionService) Create(ctx context.Context, req *models.CreateSubscriptionRequest) (*models.Subscription, error) {
 	s.logger.WithFields(logrus.Fields{
 		"user_id":      req.UserID,
@@ -42,7 +47,7 @@ func (s *subscriptionService) Create(ctx context.Context, req *models.CreateSubs
 	}).Info("creating new subscription")
 
 	if req.EndDate != nil && req.EndDate.Time.Before(req.StartDate.Time) {
-		return nil, fmt.Errorf("end_date cannot be before start_date")
+		return nil, ErrInvalidDateRange
 	}
 
 	sub := &models.Subscription{
@@ -85,7 +90,7 @@ func (s *subscriptionService) Update(ctx context.Context, id uuid.UUID, req *mod
 	sub, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		s.logger.WithError(err).Error("subscription not found")
-		return nil, fmt.Errorf("subscription not found: %w", err)
+		return nil, ErrSubscriptionNotFound
 	}
 
 	if req.ServiceName != nil {
@@ -102,7 +107,7 @@ func (s *subscriptionService) Update(ctx context.Context, id uuid.UUID, req *mod
 	}
 
 	if sub.EndDate != nil && sub.EndDate.Before(sub.StartDate) {
-		return nil, fmt.Errorf("end_date cannot be before start_date")
+		return nil, ErrInvalidDateRange
 	}
 
 	sub.UpdatedAt = time.Now()
@@ -122,7 +127,7 @@ func (s *subscriptionService) Delete(ctx context.Context, id uuid.UUID) error {
 	if err := s.repo.Delete(ctx, id); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			s.logger.WithError(err).Error("subscription not found")
-			return fmt.Errorf("subscription not found")
+			return ErrSubscriptionNotFound
 		}
 		s.logger.WithError(err).Error("failed to delete subscription")
 		return fmt.Errorf("failed to delete subscription: %w", err)
@@ -167,15 +172,49 @@ func (s *subscriptionService) GetTotalCost(ctx context.Context, req *models.Tota
 	}).Info("calculating total cost")
 
 	if req.EndDate.Time.Before(req.StartDate.Time) {
-		return nil, fmt.Errorf("end_date cannot be before start_date")
+		return nil, ErrInvalidDateRange
 	}
 
-	total, err := s.repo.GetTotalCost(ctx, req.UserID, req.ServiceName, req.StartDate.Time, req.EndDate.Time)
+	periodStart := req.StartDate.Time
+    periodEnd := req.EndDate.Time
+
+	subs, err := s.repo.GetActiveSubscriptions(ctx, req.UserID, req.ServiceName, periodStart, periodEnd)
 	if err != nil {
 		s.logger.WithError(err).Error("failed to calculate total cost")
 		return nil, fmt.Errorf("failed to calculate total cost: %w", err)
 	}
 
-	s.logger.WithField("total_cost", total).Info("total cost calculated successfully")
-	return &models.TotalCostResponse{TotalCost: total}, nil
+	totalCost := 0
+    for _, sub := range subs {
+        months := calculateMonthsInPeriod(sub, periodStart, periodEnd)
+        cost := sub.Price * months
+        totalCost += cost
+
+        s.logger.WithFields(logrus.Fields{
+            "subscription_id": sub.ID,
+            "service_name":    sub.ServiceName,
+            "price":           sub.Price,
+            "months":          months,
+            "cost":            cost,
+        }).Debug("calculated subscription cost for period")
+    }
+
+	s.logger.WithField("total_cost", totalCost).Info("total cost calculated successfully")
+	return &models.TotalCostResponse{TotalCost: totalCost}, nil
+}
+
+func calculateMonthsInPeriod(sub models.Subscription, periodStart, periodEnd time.Time) int {
+    activeStart := sub.StartDate
+    if activeStart.Before(periodStart) {
+        activeStart = periodStart
+    }
+
+    activeEnd := periodEnd
+    if sub.EndDate != nil && sub.EndDate.Before(periodEnd) {
+        activeEnd = *sub.EndDate
+    }
+
+    years := activeEnd.Year() - activeStart.Year()
+    months := int(activeEnd.Month()) - int(activeStart.Month())
+    return years*12 + months + 1
 }

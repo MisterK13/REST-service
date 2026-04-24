@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"errors"
+    "gorm.io/gorm"
+
 	"REST_service/internal/models"
 	"REST_service/internal/service"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -46,8 +48,14 @@ func (h *SubscriptionHandler) Create(c *gin.Context) {
 	sub, err := h.service.Create(c.Request.Context(), &req)
 	if err != nil {
 		h.logger.WithError(err).Error("failed to create subscription")
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
-		return
+
+		if errors.Is(err, service.ErrInvalidDateRange) {
+            c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+            return
+        }
+
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
+        return
 	}
 
 	c.JSON(http.StatusCreated, sub)
@@ -71,9 +79,15 @@ func (h *SubscriptionHandler) GetByID(c *gin.Context) {
 
 	sub, err := h.service.GetByID(c.Request.Context(), id)
 	if err != nil {
-		h.logger.WithError(err).Error("subscription not found")
-		c.JSON(http.StatusNotFound, ErrorResponse{Error: "subscription not found"})
-		return
+		h.logger.WithError(err).Error("failed to get subscription")
+        
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            c.JSON(http.StatusNotFound, ErrorResponse{Error: "subscription not found"})
+            return
+        }
+        
+        c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
+        return
 	}
 
 	c.JSON(http.StatusOK, sub)
@@ -106,8 +120,19 @@ func (h *SubscriptionHandler) Update(c *gin.Context) {
 	sub, err := h.service.Update(c.Request.Context(), id, &req)
 	if err != nil {
 		h.logger.WithError(err).Error("failed to update subscription")
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
-		return
+        
+        if errors.Is(err, service.ErrSubscriptionNotFound) {
+            c.JSON(http.StatusNotFound, ErrorResponse{Error: "subscription not found"})
+            return
+        }
+        
+        if errors.Is(err, service.ErrInvalidDateRange) {
+            c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+            return
+        }
+        
+        c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
+        return
 	}
 
 	c.JSON(http.StatusOK, sub)
@@ -129,13 +154,15 @@ func (h *SubscriptionHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.service.Delete(c.Request.Context(), id); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			c.JSON(http.StatusNotFound, ErrorResponse{Error: "subscription not found"})
-			return
-		}
 		h.logger.WithError(err).Error("failed to delete subscription")
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
-		return
+        
+        if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, service.ErrSubscriptionNotFound) {
+            c.JSON(http.StatusNotFound, ErrorResponse{Error: "subscription not found"})
+            return
+        }
+        
+        c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
+        return
 	}
 
 	c.Status(http.StatusNoContent)
@@ -175,7 +202,7 @@ func (h *SubscriptionHandler) List(c *gin.Context) {
 	subs, total, err := h.service.List(c.Request.Context(), userID, serviceName, page, pageSize)
 	if err != nil {
 		h.logger.WithError(err).Error("failed to list subscriptions")
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
 		return
 	}
 
@@ -229,8 +256,14 @@ func (h *SubscriptionHandler) GetTotalCost(c *gin.Context) {
 	result, err := h.service.GetTotalCost(c.Request.Context(), &req)
 	if err != nil {
 		h.logger.WithError(err).Error("failed to calculate total cost")
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
-		return
+        
+        if errors.Is(err, service.ErrInvalidDateRange) {
+            c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+            return
+        }
+        
+        c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
+        return
 	}
 
 	c.JSON(http.StatusOK, result)
